@@ -1,0 +1,241 @@
+library(sna);library(network);library(centiserve)
+library(CINNA)
+library(igraph);library(phyloseq)
+pathP<- "P:/Surrogate/Network_Comparison/Data/"
+pathOld<- "H:/cbal5115/Documents/PhD/Probiotics/Surrogate/files/"
+pathS<-"P:/Surrogate/Network_Comparison/Scripts/"
+#source(paste0(pathS,"network_functions13_05.R"))
+source(paste0(pathS,"d_statistic.R"))
+source(paste0(pathS,"network_ps.R"))
+allphyslv2<- readRDS(paste0(pathP,"renamed_phylo_list.RDS"))
+
+pathPlots<-"P:/Surrogate/Network_Comparison/Plots/"
+
+baseGraphs<- readRDS(file=paste0(pathP,"baseGraphs.RDS"))
+baseAdjs<- readRDS(file=paste0(pathP,"baseAdjs.RDS"))
+baseDstats<-readRDS(file=paste0(pathP,"baseDstats.RDS"))
+ensembleDstats<-readRDS(file=paste0(pathP,"ensembleDstats.RDS"))
+ensembleGraphs<- readRDS(paste0(pathP,"ensemble_graphs.RDS"))
+univals <- readRDS(file=paste0(pathP,"univalsdf.RDS"))
+
+## Generate Meta info
+Author<- c(rep("Wagner_2016",30),rep("Patrick_2018",28),rep("Santos-Medellin_2017",12),rep("Zarraonaindia_2014",8), rep("Baldock_2019",8),rep("Edwards_2018",22))
+Organ<- c(rep(c("Leaf","Root"),15),rep("Root",28),rep("Root",12),
+          rep("Root",8),rep(c("Leaf","Root"),4),rep("Root",22))
+
+strmv<- 7 
+
+## Remove 7 from the data as thentwork has no edges
+mantel(as.dist(ensembleDstats[[1]]),as.dist(ensembleDstats[[2]][-strmv,-strmv]))
+
+
+cmds<-lapply(ensembleDstats,function(x)cmdscale(as.dist(x),eig=TRUE))
+
+
+
+
+# Generate ordinations of the ensemble plots
+st_dfntks<- data.frame(cmds[[1]]$points,Author=Author[-strmv],
+                       Organ=Organ[-strmv],slope_coef=univals$meanSlope[-strmv],Fns=univals$Fns[-strmv])
+nst_dfntks<- data.frame(cmds[[2]]$points,Author=Author,
+                        Organ=Organ,univals)
+
+gg_st<- ggplot(data=st_dfntks,aes(X1,X2,color=Author))+
+  geom_point(size=2,alpha=0.5)+theme_light()+
+  xlab(paste0("Axis 1 [ ",round(cmds[[1]]$eig[1]/sum(cmds[[1]]$eig),3)*100 ,"% ]" ))+
+  ylab(paste0("Axis 2 [ ",round(cmds[[1]]$eig[2]/sum(cmds[[1]]$eig),3)*100 ,"% ]" ))+
+  theme(legend.position = "none")
+
+gg_nst<- ggplot(data=nst_dfntks,aes(X1,X2,color=Author))+
+  geom_point(size=2,alpha=0.5)+theme_light()+
+  xlab(paste0("Axis 1 [ ",round(cmds[[2]]$eig[1]/sum(cmds[[2]]$eig),3)*100 ,"% ]" ))+
+  ylab(paste0("Axis 2 [ ",round(cmds[[2]]$eig[2]/sum(cmds[[2]]$eig),3)*100 ,"% ]" )) #+
+theme(legend.position = "none")
+
+grid.arrange(gg_st,gg_nst,ncol=2)
+## Network Properties 
+ggsave(arrangeGrob(gg_st,gg_nst,ncol=2),file=paste0(pathPlots,"ls_ms_main_ord.png"),dpi=300)
+
+
+
+```
+
+Model the main drivers of network structure 
+
+```{r}
+library(e1071)
+# As per Yan et al 2017 
+degree_hetero<- function(x){
+  S<- length(V(x))
+  deg<- degree(x)
+  k_1<-  (1/S*sum(deg))^2 # sum of degree
+  k_2<- moment(deg,order=2,center = FALSE) # Raw second order moment 
+  return(k_2/k_1)
+}
+
+# Staility criteria, but no d to compare : ls_ntkdf$degree_het > sqrt(ls_ntkdf$degree_het*(ls_ntkdf$S-1)*ls_ntkdf$Connectance)
+
+## Get technical stats and network stats, make a data.frame with all and adjust factor codings
+
+ntk_df<- plyr::ldply(lapply(ensembleGraphs$Not_Stringent,function(x){
+  data.frame( E=length(E(x)),S=length(V(x)),deg=sum(degree(x)),
+              Shannon=vegan::diversity(degree(x)),
+              degree_het=degree_hetero(x),
+              
+              
+              Simpson=vegan::diversity(degree(x),"simpson"))}))
+
+phy_df<- plyr::ldply(lapply(allphyslv2,function(x){
+  data.frame(seqDepth=mean(sample_sums(x)), N=nsamples(x),
+             nFamilies=ntaxa(x))}))
+
+ls_ntkdf<- data.frame(ntk_df,phy_df,nst_dfntks) #,int_var=int_var[-7])
+
+#Connectance<- ls_ntkdf$E/((ls_ntkdf$nFamilies*(ls_ntkdf$nFamilies-1))/2)
+Connectance<- ls_ntkdf$E/( (ls_ntkdf$S*(ls_ntkdf$S-1))/2)
+
+
+ls_ntkdf$Connectance<- Connectance
+
+contrasts(ls_ntkdf$Author)=contr.sum
+contrasts(ls_ntkdf$Organ)=contr.sum
+AuthorOrgan<- paste(ls_ntkdf$Author,ls_ntkdf$Organ)
+AuthorOrgan<- as.factor(AuthorOrgan)
+ls_ntkdf$AuthorOrgan<- AuthorOrgan
+contrasts(ls_ntkdf$AuthorOrgan)=contr.sum
+ls_ntkdf$seqDepthLog<- log(ls_ntkdf$seqDepth)
+
+
+lm_df<- data.frame(X1= ls_ntkdf$X1,
+                   X2= ls_ntkdf$X2, 
+                   AuthorOrgan=   ls_ntkdf$AuthorOrgan,
+                   Connectance=  scale(ls_ntkdf$Connectance,scale=F) ,
+                   S=  scale(ls_ntkdf$S,scale=F) ,
+                   Fns=  scale(ls_ntkdf$Fns,center=TRUE,scale=F), 
+                   seqDepthLog=  scale(ls_ntkdf$seqDepthLog,scale=F),
+                   nFamilies=  scale(ls_ntkdf$nFamilies,scale=F),
+                   N=  scale(ls_ntkdf$N,scale=F),
+                   meanSlope=  scale(ls_ntkdf$meanSlope,scale=F),
+                   Organ=  ls_ntkdf$Organ,
+                   Author=  ls_ntkdf$Author,
+                   deg_het=  scale(ls_ntkdf$degree_het,scale=F)
+)
+
+rownames(lm_df)<- names(ensembleGraphs$Not_Stringent)
+
+saveRDS(ls_ntkdf,file=paste0(pathP,"ls_ntk_df.RDS")) 
+
+```
+
+```{r}
+
+
+capav<- anova(capscale(
+  as.dist(ensembleDstats[[2]])~
+    ls_ntkdf$Author+
+    ls_ntkdf$Organ+
+    Condition(log(ls_ntkdf$seqDepth))),
+  by="term" )
+
+capav2<- anova(capscale(
+  as.dist(ensembleDstats[[2]])~
+    ls_ntkdf$Author+
+    ls_ntkdf$Organ+
+    ls_ntkdf$Organ+
+    ls_ntkdf$S+
+    ls_ntkdf$Connectance+
+    ls_ntkdf$degree_het+
+    ls_ntkdf$meanSlope+
+    ls_ntkdf$Fns+
+    Condition(log(ls_ntkdf$seqDepth))),
+  by="term" )
+
+capav$SumOfSqs[1]/sum(capav$SumOfSqs)
+capav$SumOfSqs[2]/sum(capav$SumOfSqs)
+
+# First 2 axis explain 73 % of var, so ust used them 
+lmX1<- lm(X1~  Author+Organ+  N+ 
+            seqDepthLog+Connectance+S + 
+            meanSlope+deg_het+Fns,
+          data=lm_df)
+
+
+lmX2<- lm(X2~  Author+Organ+ N+ 
+            seqDepthLog+ Connectance+S + 
+            meanSlope+deg_het+ Fns,
+          data=lm_df)
+
+summary.aov(lmX1)$coefficients
+
+## 
+# 1 The deg_het connectance, author, N  log(seqdepth)
+# 2 aUTHOR, N families, S, Copnnecantce 
+qqnorm(residuals(lmX1));qqline(residuals(lmX1))
+qqnorm(resi
+       duals(lmX2));qqline(residuals(lmX1))
+
+
+#lmerX1_2<- lmer(X1~  nFamilies+ N+ seqDepthLog+  Connectance+S +meanSlope+deg_het+
+#             Fns+(1|Author),data=lm_df)
+#ax1<- afex::mixed(lmerX1_1,data=lm_df)
+
+
+lm1_aov<- data.frame(round(summary.aov(lmX1)[[1]],3))
+lm2_aov<-data.frame(round(summary.aov(lmX2)[[1]],3))
+Treatment<- c("Author","Organ","Sample Size","Seq Depth","C","S","DOC Slope","Degree-het","Fns","Residuals")
+
+thecols<- colnames(lm1_aov)
+all_aovs<- cbind(Treatment, lm1_aov,lm2_aov)
+all_aovs<- data.frame(all_aovs)
+all_aovs<- na.omit(all_aovs)
+library(kableExtra)
+all_aovs %>% 
+  mutate_if(colnames(all_aovs)%in%colnames(all_aovs)[c(6,11)] , function(x){
+    cell_spec(x,  
+              color = ifelse(na.omit(x)<=0.05, "white","black"),
+              bold = ifelse(na.omit(x)<= 0.05, T,F),
+              background = ifelse(na.omit(x)<= 0.05,"#FC4E07",""))})%>%
+  kable(escape=F,col.names = c("Treatment",thecols,thecols))%>%
+  kable_styling(full_width = F,"striped",fixed_thead = F) %>%
+  add_header_above(c("", "First Axis" = 5, 
+                     "Second Axis" = 5))%>% 
+  column_spec(c(2,7),border_left = T)%>%
+  as_image(width = 0.1,file="Ntk_Results.png")
+
+
+
+legend1<- get_legend(ggplot(data=ls_ntkdf,aes(x=Connectance,y=degree_het))+
+                       geom_point(size=2,alpha=0.5,aes(color=Organ))+
+                       theme_light()+theme()+
+                       labs(y="Degree Heterogenity")+geom_smooth(alpha=0.3,method="lm"))
+
+ggcd<- ggplot(data=ls_ntkdf,aes(x=Connectance,y=degree_het))+
+  geom_point(size=2,alpha=0.5,aes(color=Organ))+
+  theme_light()+theme(legend.position = "none")+
+  labs(y="Degree Heterogenity")+geom_smooth(alpha=0.3,method="lm")
+
+ggsc<- ggplot(data=ls_ntkdf,aes(x=S,y=Connectance))+
+  geom_point(size=2,alpha=0.5,aes(color=Organ))+
+  theme_light()+theme(legend.position = "none")+
+  geom_smooth(alpha=0.3,method="lm")
+
+ggsd<- ggplot(data=ls_ntkdf,aes(x=S,y=degree_het))+
+  geom_point(size=2,alpha=0.5,aes(color=Organ))+
+  theme_light()+theme(legend.position = "none")+
+  labs(y="Degree Heterogenity")+geom_smooth(alpha=0.3,method="lm")
+
+ggsave(arrangeGrob(ggcd,ggsc,ggsd, legend1, ncol=2),file=paste0(pathPlots,"Ntk_propertiesCSD.png"),dpi=300)
+
+ggPC<- ggplot(data=ls_ntkdf)+geom_point(aes(x=X1,y=X2,color=S),fill=2 ,size=3)+
+  
+  
+  stab_crit<-  sqrt(ls_ntkdf$degree_het*(ls_ntkdf$S-1)*ls_ntkdf$Connectance)
+
+ggPC<- ggplot(data=ls_ntkdf)+geom_point(aes(x=X1,y=X2,color=S),fill=2 ,size=3)+
+  theme_light()+
+  labs(y="Axis 2",x="Axis 1")+theme(legend.title = element_blank())
+ggPC2<- ggplot(data=ls_ntkdf)+geom_point(aes(x=X1,y=X2,color=stab_crit),fill=2 ,size=3)+
+  theme_light()+
+  labs(y="Axis 2",x="Axis 1")+theme(legend.title = element_blank())
+
+ggsave(arrangeGrob(ggPC,ggPC2,ncol=2),file=paste0(pathPlots,"ensembe_d_ntk_properties.png"),dpi=300)
