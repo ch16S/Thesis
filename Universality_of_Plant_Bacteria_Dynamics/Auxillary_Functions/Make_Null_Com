@@ -1,0 +1,31 @@
+
+func_make_null <- function(A,N_null=1){
+  # THE FUNCTION ASSUMES THAT UNASSIGNED SPECIES (IN CASE OF GENUS) ARE
+  # ALREADY REMOVED - SO THE TOTAL ABUNDANCE OF EACH SAMPLE <=1
+
+  NumSpecies <- ncol(A)
+  NumSamples <- nrow(A)
+  NumSamples_null <- N_null*NumSamples
+  
+  A_null <- matrix(0, NumSamples_null,NumSpecies)
+  
+  for (j in 1:NumSamples){
+    #j_real <- ((j-1) %% NumSamples)+1
+    for (i in 1:NumSpecies){
+      if(A[j,i]>0){
+        Inonzeros <- which(A[,i]>0)
+        RAND <- sample.int(length(Inonzeros),1,replace=FALSE)
+        A_null[j,i] <- A[Inonzeros[RAND],i]
+      } else {
+        A_null[j,i] <- 0
+      }
+    }
+  }
+  A_null2<- A_null/rowSums(A_null)
+  
+  return(A_null2)
+}
+### end 
+
+
+
