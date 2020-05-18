@@ -19,7 +19,7 @@ ensembleGraphs<- readRDS(paste0(pathP,"ensemble_graphs.RDS"))
 univals <- readRDS(file=paste0(pathP,"univalsdf.RDS"))
 
 ## Generate Meta info
-Author<- c(rep("Wagner_2016",30),rep("Patrick_2018",28),rep("Santos-Medellin_2017",12),rep("Zarraonaindia_2014",8), rep("Baldock_2019",8),rep("Edwards_2018",22))
+Author<- c(rep("Wagner_2016",30),rep("Fitzpatrick_2018",28),rep("Santos-Medellin_2017",12),rep("Zarraonaindia_2014",8), rep("Baldock_2019",8),rep("Edwards_2018",22))
 Organ<- c(rep(c("Leaf","Root"),15),rep("Root",28),rep("Root",12),
           rep("Root",8),rep(c("Leaf","Root"),4),rep("Root",22))
 
