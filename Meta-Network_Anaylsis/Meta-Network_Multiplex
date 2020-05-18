@@ -1,0 +1,85 @@
+pathContam<- "P:/Surrogate/Contam/"
+
+library(mplex)
+source(paste0(pathContam,"add_inter_layer.R"))
+source(paste0(pathContam,"mplex_generate.R"))
+source(paste0(pathContam,"participationIndexMplex.R"))
+
+edge_df<- lapply(ensembleGraphs$Not_Stringent,function(x){
+  y<- igraph::as_data_frame(x,"edges")
+  y$Precision<- rep(1,nrow(y))
+  return(y)})
+
+nodeList<- data.frame(ID=1:length(taxa_names(ps1)),label=taxa_names(ps1))
+mplexObj <- generate.multiplex(nodes = nodeList,layersNames = FALSE,
+                               layersList=edge_df,
+                               type = "undirected"
+)
+topoov<- mplex::aggregatedTopological.multiplex(mplexObj)
+## Participation  fix this one still  
+parcoef<- participationDegree.multiplex(mplexObj)
+degov<- degree(graph.adjacency(aggregatedOverlapping.multiplex(obj, indexLayer = 1:26),mode="undirected"), loops = FALSE)
+supraeigcen<- mplex::supraEigenvectorCentrality.multiplex(mplexObj,rowStand = FALSE)
+supraeigcen_std<- mplex::supraEigenvectorCentrality.multiplex(mplexObj)
+
+# C
+c1GlobalClust<- C1Global.multiplex(mplexObj,verbose=TRUE)
+#c2GlobalClust<- C2Global.multiplex(mplexObj,verbose=TRUE)
+
+c1LocalClust<- c1Local.multiplex(mplexObj)
+#c2LocalClust<- c2Local.multiplex(mplexObj)
+transivity<- mplex::localClustering.multiplex(mplexObj)
+zdegree<- scale(log(parcoef$degreeOverlap 
+                    +1))
+
+nodeList$label[1]
+tax<- strsplit(as.character(nodeList$label)," ")
+tax2<- lapply(tax,function(x)data.frame(Phylum=x[1],Class=x[2],Order=x[3],Family=x[4]))
+tax3<- plyr::ldply(tax2,as.data.frame)
+par_df<- data.frame(parcoef,zdegree,c1LocalClust,tax3)
+library(dplyr)
+library(dplyr)
+
+
+important<- par_df %>% 
+  filter(Part_coef >= 0.66) %>%
+  group_by(Class)%>%
+  tally(name="classcount")%>%
+  mutate(Fraction=classcount/sum(classcount),type=rep("High Part."))
+
+
+important2<- par_df  %>%
+  filter(zdegree> 1 & Part_coef >= 0.66)%>%
+  group_by(Class)%>%
+  tally(name="classcount")%>%
+  mutate(Fraction=classcount/sum(classcount),type=rep("High Degree and Part."))
+
+both<- rbind(important,important2)
+ggbarparandz<- ggplot(data=both,aes(x=Class,y=Fraction,fill=type))+geom_col(position = "dodge")+theme_light()+coord_flip()+labs(y="% of High Participation Taxa",x="") 
+
+
+
+ggplot(data=par_df,aes(x=Rank,y=Part_coef,color=Class))+geom_poitn(size=1.5,alpha=0.6)+theme_light()
+
+ggparRank<- ggplot(data=par_df,aes(x=Rank,y=Part_coef,color=Class))+
+  geom_point(size=1.5,alpha=0.6)+
+  theme_light()+geom_hline(yintercept=c(0.33,0.66),alpha=0.3,size=1)+
+  labs(y="Participation Coefficient")+
+  theme(legend.position = "none")
+
+ggsave(file=paste0(pathP,))
+
+ggzpart<- ggplot(data=par_df,aes(x=Part_coef,y=zdegree,color=Class))+
+  geom_point(size=1.5,alpha=0.6)+
+  theme_light()+
+  theme(legend.position = "none")+
+  geom_vline(xintercept=c(0.33,0.66),alpha=0.3,size=1)+
+  geom_hline(yintercept = c(0,-1,1),alpha=0.3,size=1)+
+  labs(x="Participation Coefficient",y="z-Degree")
+glayout<- rbind(c(1,1,2,2),c(1,1,3,3))
+gg1<- arrangeGrob(ggbarparandz,ggparRank,ggzpart,layout_matrix = glayout)
+ggsave(gg1,file=paste0(pathPlots,"multiplex_parts.png"),dpi=300)
+
+theinfamous<- par_df %>% filter(Part_coef> 0.66 & zdegree> 1)
+
+```
