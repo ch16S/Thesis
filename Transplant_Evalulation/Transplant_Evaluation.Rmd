@@ -1,0 +1,600 @@
+---
+title: "Transplant Anaylsis "
+output: html_notebook
+---
+
+Load packages, files, remove organellar DNA and caculate alpha diversity measures.  
+
+```{r}
+
+library(phyloseq);library(gridExtra);library(ggplot2);library(plyr);library(dplyr)
+pathPlots<- "P:/Surrogate/Transplant_Anaylsis/Plots/"
+
+path<- "P:/USYD_Stuff/Surrogate/files/"
+asv<- readRDS( paste0(path,"surr_ASV_V3.RDS"))
+tax<- readRDS("H:/cbal5115/Documents/PhD/Probiotics/Surrogate/files/surr_TAX_V3.RDS")
+meta<-read.csv("H:/cbal5115/Documents/PhD/Probiotics/Surrogate/files/surr_metav2.csv",header = TRUE,row.names=1)
+tree<- readRDS("H:/cbal5115/Documents/PhD/Probiotics/Surrogate/files/fitGTR.RDS")
+
+path<- "P:/USYD_Stuff/Surrogate/files/"
+
+ps<-phyloseq(otu_table(asv,taxa_are_rows=FALSE),
+             tax_table(tax),sample_data(meta),phy_tree(tree$tree))
+filterPhyla = c("f__mitochondria")
+surr1mito<- subset_taxa(ps,Family %in% filterPhyla)
+filterPhyla = c("c__Chloroplast")
+surr1chloro<-  subset_taxa(ps,Class %in% filterPhyla)
+surr1organeller<- rowSums(otu_table(surr1mito))+rowSums(otu_table(surr1chloro))
+
+
+filterPhyla = c("f__mitochondria")
+ps0<- subset_taxa(ps,!Family %in% filterPhyla)
+filterPhyla = c("c__Chloroplast")
+ps0<- subset_taxa(ps0,!Class %in% filterPhyla)
+ps0 <- subset_taxa(ps0, !is.na(Phylum) & !Phylum %in% c("", " uncharacterized"))
+
+table(tax_table(ps0)[, "Family"], exclude = NULL) 
+table(tax_table(ps0)[, "Class"], exclude = NULL) 
+alphas<-estimate_richness(ps0,measures = c("shannon","simpson","Observed","Chao1"))
+sample_data(ps0)<-cbind(sample_data(ps0),alphas,surr1organeller)
+seqs<-rowSums(otu_table(ps0))
+plastidRatio<-log((seqs+1)/(surr1organeller+1))
+sample_data(ps0)<-cbind(sample_data(ps0),seqs,plastidRatio)
+
+remove<-which(rowSums(otu_table(ps0))<500)
+toremove<-c(names(remove))
+ps0<-subset_samples(ps0,!rownames(otu_table(ps0)) %in% toremove )
+
+surr1<-subset_samples(ps0,sample_data(ps0)$Experiment=="Surrogate")
+
+asvs<-readRDS("H:/cbal5115/Documents/PhD/Probiotics/Surrogate/files/surr2v3_asv.RDS") ## 
+tax<-readRDS("H:/cbal5115/Documents/PhD/Probiotics/Surrogate/files/SurrRun2_tax.RDS") ## 
+samp<- read.csv("H:/cbal5115/Documents/PhD/Probiotics/Surrogate/files/surr2_sData.csv",header=TRUE,row.names=1) 
+
+ps<- phyloseq(otu_table(asvs,taxa_are_rows = FALSE),sample_data(samp),tax_table(tax))
+filterPhyla = c("f__mitochondria")
+surr2mito<- subset_taxa(ps,Family %in% filterPhyla)
+filterPhyla = c("c__Chloroplast")
+surr2chloro<-  subset_taxa(ps,Class %in% filterPhyla)
+surr2organeller<- rowSums(otu_table(surr2chloro))+rowSums(otu_table(surr2chloro))
+
+
+ps2 <- subset_taxa(ps, !is.na(Phylum) & !Phylum %in% c("", " uncharacterized"))
+mito<-c("f__mitochondria")
+ps2<- subset_taxa(ps2,!Family %in% mito)
+chloro = c("c__Chloroplast")
+surr2<- subset_taxa(ps2,!Class %in% chloro) ## note the change in taxonomic level to remove an order opposed to family (applies to any level)
+
+
+
+surr_merge<- merge_phyloseq(surr1,surr2)
+
+
+
+```
+
+
+
+
+Format data to generate origin taxonomy 
+Read in a merge sample data file to correct for spacers in factor columns
+```{r}
+samp<- read.csv(paste0(path,"mergedMeta.csv"),header=TRUE,row.names = 1)
+
+surr_merge2<- surr_merge
+sample_data(surr_merge2)<- samp 
+
+tree1<- phy_tree(surr_merge2)
+
+donors<- subset_samples(surr_merge2,sample_data(surr_merge)$Donor.Surrogate=="Donor")
+donors<- filter_taxa(donors,function(x)sum(x>0)>0,TRUE)
+donors2<- phyloseq(otu_table(donors),tax_table(donors),sample_data(donors))
+
+surr_merge<- subset_samples(surr_merge,sample_data(surr_merge)$Donor.Surrogate!="Donor")
+surr_merge4<- filter_taxa(surr_merge3,function(x)sum(x>5)>5,TRUE)
+
+surr_merge5<- phyloseq(otu_table(surr_merge4),tax_table(surr_merge4),sample_data(surr_merge4))
+surr_merge6<- merge_phyloseq(surr_merge5,donors2)
+
+surr_merge_gen<- tax_glom(surr_merge6,"Genus")
+
+#donor<- subset_taxa(ps5,Family %in% tax_table(donor)[,"Family"]
+#donor2<- subset_taxa(donor,Genus %in% c(startingtax$gg_Genus,"g__",NA))
+
+
+```
+
+
+Donor specfic taxonomy.
+```{r}
+
+
+phyloseq_sep_variable <- function(physeq, variable, drop_zeroes = T){
+    
+    # require(phyloseq)
+    # require(plyr)
+
+    ## Check the input
+    if(is.null(phyloseq::sample_data(physeq, errorIfNULL = F))){
+        stop("Sample data is missing in the phyloseq-object.\n")
+    }
+
+    ## Extract samle meta-data
+    mtd <- as(object = phyloseq::sample_data(physeq), Class = "data.frame")
+
+    if(!variable %in% colnames(mtd)){
+        stop("Grouping variable is missing from the sample data of phyloseq-object.\n")
+    }
+
+    if(class(mtd[, variable]) %in% c("integer", "numeric") ){
+        if( length( unique(mtd[, variable]) ) > 5){
+          stop("Groupping variable is numeric and it has too many levels. Consider transforming it to factor.\n")
+        } else {
+          warning("Groupping variable is numeric and it was coerced to factor.\n")
+          mtd[, variable] <- factor(mtd[, variable])
+        }
+    }
+
+    if(length(table(mtd[, variable])) == 1){
+        cat("Warning: there is only one group of samples in the resulting list.\n")
+    }
+
+    ## Add sample IDs to the meta-data
+    smp <- data.frame(
+        SID = phyloseq::sample_names(physeq),
+        mtd,
+        stringsAsFactors = F)
+
+    ## Exatract sample names by the specified variable
+    svv <- plyr::dlply(.data = smp, .variables = variable, .fun = function(z){ z$SID })
+
+    ## Extract samples by groupping variable
+    res <- plyr::llply(.data = svv, .fun = function(z){ phyloseq::prune_samples(z, x = physeq) })
+
+    ## Remove taxa with zero abundance
+    if(drop_zeroes == TRUE){
+        res <- plyr::llply(.data = res, .fun = function(x){ phyloseq::prune_taxa(phyloseq::taxa_sums(x) > 0, x) })
+    }
+
+    return(res)
+}
+
+
+
+#Genus 
+gen1<- surr_merge_gen
+gen1.2<- subset_samples(gen1 , sample_data(gen1)$Donor.Surrogate != "Control")
+gen1.3 <- filter_taxa(gen1.2,function(x)sum(x>0)>1,TRUE)
+saveRDS(gen1.3,paste0(path,"surrGenPhylo.RDS"))
+
+
+saveRDS(gen1.3,file=paste0(path,"surrGenPhylo.RDS"))
+
+
+#Genus
+donorCulCom<-paste(sample_data(gen1.3)$Donor_Species,
+                   sample_data(gen1.3)$Cultured.Total,
+                   sample_data(gen1.3)$Donor.Surrogate,
+                   sample_data(gen1.3)$Compartment)
+
+sample_data(gen1.3)<-cbind(sample_data(gen1.3),donorCulCom)
+
+gen1.3log<- transform_sample_counts(gen1.3,function(x)log10(x+1))
+
+surrgenSumlog<- merge_samples(gen1.3,"donorCulCom",fun=sum)
+
+write.csv(tax_table(surrgenSumlog),file=paste0(path,"genL1PhyloTax",".csv"))
+write.csv(otu_table(surrgenSumlog),file=paste0(path,"genL1PhyloOtu",".csv"))
+
+genDonor<-merge_samples(gen1.3,"Donor.Surrogate",fun=sum)
+
+write.csv(tax_table(genDonor),file=paste0(path,"gendsPhyloTax",".csv"))
+write.csv(otu_table(genDonor),file=paste0(path,"gendsPhyloOtu",".csv"))
+
+
+
+```
+
+```{r}
+
+# Match row names of the donor taxonomy with the bydonor phyloseq list 
+donorTax<-read.csv(file=paste0(path,"genus_origin_tax.csv"),header=TRUE,row.names = 1)
+
+gen1.3<- readRDS(paste0(path,"surrGenPhylo.RDS"))
+
+donorCulCom<-paste(sample_data(gen1.3)$Donor_Species,sample_data(gen1.3)$Cultured.Total,sample_data(gen1.3)$Donor.Surrogate,sample_data(gen1.3)$Compartment)
+sample_data(gen1.3)<- cbind(sample_data(gen1.3),donorCulCom)
+
+
+donorRichness<- apply(donorTax[,1:8],2,function(x)sum(x=="Donor"))
+gen1.4<- subset_samples(gen1.3,sample_data(gen1.3)$Donor.Surrogate != "Donor")
+colnames(donorTax)[1:8]<- rep("Origin",8)
+tax_table(gen1.4)<- as.matrix(donorTax)
+bydonor<- phyloseq_sep_variable(gen1.4,"donorCulCom")
+
+
+```
+
+Make bar plots
+```{r}
+### 
+sdatao<- sample_data(gen1.4)
+
+sdatao<- sdatao[order(sdatao$Compartment,sdatao$Donor.Surrogate,sdatao$Plant),]
+
+genra<-transform_sample_counts(gen1.4,function(x)x/sum(x))
+genmelt<- psmelt(genra)
+
+genmelt$donorculcomHost<- paste0(genmelt$Compartment,genmelt$Donor_Species,genmelt$Plant)
+genmelt$timeculrep<- paste0(genmelt$Time,genmelt$Cultured.Total,genmelt$Replicate)
+make.unique(genmelt$timeculrep)
+ggplot(data=genmelt,aes(x=Sample,y=Abundance,fill=Origin))+
+  theme_light()+
+  geom_bar(stat="identity", size=1,color="white")+
+  geom_hline(yintercept = c(0,1))+
+  facet_wrap(~donorculcomHost)
+
+pbars<-lapply(bydonor,function(x){ plot_bar(transform_sample_counts(x,function(y)y/sum(y)),fill="Origin")+
+  theme_light()+
+  geom_bar(stat="identity", size=1,color="white")+
+  geom_hline(yintercept = c(0,1))+theme(legend.position ="none",axis.text.x=element_blank(),axis.text.y=element_blank())+ylab("")+xlab("") })
+ggsave(arrangeGrob(pbar1),file=paste0(pathTA,"origin_barplots.png"), dpi=300)
+
+grid.arrange(pbars[[1]]+ylab("Abundance")+theme(axis.text.y=element_text()),
+             pbars[[3]],pbars[[5]],pbars[[7]],
+             pbars[[2]],pbars[[4]],pbars[[6]],pbars[[8]],nrow=1)
+
+ggsave(arrangeGrob(pbars[[1]]+ylab("Abundance")+theme(axis.text.y=element_text()),
+             pbars[[3]],pbars[[5]],pbars[[7]],
+             pbars[[2]],pbars[[4]],pbars[[6]],pbars[[8]],nrow=1),
+       file=paste0(pathTA,"origin_barplots.png"), dpi=300)
+
+bydonors
+## Doesnt occur for prevelance but does for species_pool 
+
+
+
+```
+
+calculate ratios
+```{r}
+for(i in 1:length(bydonor)){
+    tax_table(bydonor[[i]])<- tax_table(bydonor[[i]])[,c(i,9:15)]
+     bydonor[[i]]<- phyloseq(otu_table(otu_table(bydonor[[i]]),taxa_are_rows = FALSE),sample_data(sample_data(bydonor[[i]])),tax_table(bydonor[[i]]))
+}
+
+donorratio<- lapply(bydonor,function(x){
+  tdonor<- subset_taxa(x,Origin %in% "Donor")
+  ntdonor<- subset_taxa(x,Origin %in% "Non-target Donor")
+  enviro<- subset_taxa(x,Origin %in% "Undetected")
+    ntenviro <- subset_taxa(x,!Origin %in% "Donor")
+donorntenviro<- log(rowSums(otu_table(tdonor))+1)/(log(rowSums(otu_table(ntenviro)+1)))
+donorenviro<- log(rowSums(otu_table(tdonor))+1)/(log(rowSums(otu_table(enviro)+1)))
+donorntdonor<- log((rowSums(otu_table(tdonor))+1)/(rowSums(otu_table(ntdonor)+1)))
+ratios<- cbind(donorntdonor,donorenviro,donorntenviro)
+ratios<- data.frame(ratios)
+ratios<- cbind(ratios,sample_names(x))
+colnames(ratios)<- c("Non-target_Donor","Undetected","NT_UD","Sample_name")
+return(ratios)
+})
+
+richratio<- lapply(bydonor,function(x){
+    tdonor<- subset_taxa(x,Origin %in% "Donor")
+    enviro<- subset_taxa(x,Origin %in% "Undetected")
+    ntdonor<- subset_taxa(x,Origin %in% "Non-target Donor")
+    
+     richness<- estimate_richness(x,measures = "Observed")
+     drichness<- estimate_richness(tdonor,measures = "Observed")
+     ntrichness<- estimate_richness(ntdonor,measures="Observed")
+     udrichness<- estimate_richness(enviro,measures="Observed")
+      
+     richratio<- log((drichness$Observed+1)/(ntrichness$Observed+1))
+     richratio2<- log((drichness$Observed+1)/(udrichness$Observed+1))
+     richratio3<- log((drichness$Observed+1)/((ntrichness+ udrichness$Observed+1)))
+        
+     res<- cbind(drichness$Observed,ntrichness$Observed,udrichness$Observed,
+                      richness$Observed,richratio,richratio2,richratio3)
+     res<-as.data.frame(res)
+     res<-cbind(res,sample_names(tdonor))
+     colnames(res)<-c("Target Diversity","Non-target-Diversity", "Undetected Diversity",
+                         "Total Diversity","Not-Target Ratio","Undetected Ratio","All_othersRatio" ,"Sample_name")
+return(res)
+})
+
+donorobs<-c(7,	16,	14,	86	,15	,12,	29,	80)
+
+
+res<- vector("list",length=8)
+for(i in 1:length(bydonor)){
+  tdonor<- subset_taxa(bydonor[[i]],Origin %in% "Donor")
+  obs<- estimate_richness(tdonor,measures="Observed")
+   percent<- obs$Observed/donorRichness[i]
+    obscaptured<- log((obs$Observed+1)/donorRichness[i])
+   res[[i]]<- cbind(percent,obscaptured)}
+
+
+
+recovered<- ldply(res)
+donorratio2<- ldply(donorratio)
+richratio2<- ldply(richratio)
+
+ratios<- cbind(donorratio2,richratio2,recovered)
+rownames(ratios)<- ratios$Sample_name
+converter<- gen1.4
+sample_data(converter)<- ratios
+ratios2<- sample_data(converter)
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+
+ratios2$.id <-factor(ratios2$.id,levels=c( "Avocado Cultured Surrogate Leaf","Banana Cultured Surrogate Leaf","Avocado Uncultured Surrogate Leaf", "Banana Uncultured Surrogate Leaf","Avocado Cultured Surrogate Root" ,"Banana Cultured Surrogate Root","Avocado Uncultured Surrogate Root","Banana Uncultured Surrogate Root" ))
+
+levels(ratios3$.id) <- gsub(" ", "\n", levels(ratios3$.id))
+ratios3<- cbind(ratios2,sdata)
+
+
+###### Similar, but pooling target non-target for cross study comparison
+
+
+
+donorratio<- lapply(bydonor,function(x){
+  tdonor<- subset_taxa(x,Origin %in% "Donor")
+  ntdonor<- subset_taxa(x,Origin %in% c("Non-target Donor","Undetected"))
+donorntdonor<- log((rowSums(otu_table(tdonor))+1)/(rowSums(otu_table(ntdonor)+1)))
+ratios<- data.frame(donor_ratio=donorntdonor,sample_sums(tdonor),sample_sums(ntdonor))
+return(ratios)
+})
+
+richratio<- lapply(bydonor,function(x){
+    tdonor<- subset_taxa(x,Origin %in% "Donor")
+    ntdonor<- subset_taxa(x,Origin %in% c("Non-target Donor","Undetected"))
+    
+     richness<- estimate_richness(x,measures = "Observed")
+     drichness<- estimate_richness(tdonor,measures = "Observed")
+     ntrichness<- estimate_richness(ntdonor,measures="Observed")
+
+     richratio<- log((drichness$Observed+1)/(ntrichness$Observed+1))
+
+     res<- cbind(drichness$Observed,ntrichness$Observed,
+                      richness$Observed,richratio)
+     res<-as.data.frame(res)
+     res<-cbind(res,sample_names(tdonor))
+     colnames(res)<-c("Target Diversity","Non-target-Diversity", 
+                         "Total Diversity","Richness_ratio" ,"Sample_name")
+return(res)
+})
+
+donorobs<-c(7,	16,	14,	86	,15	,12,	29,	80)
+
+
+res<- vector("list",length=8)
+for(i in 1:length(bydonor)){
+  tdonor<- subset_taxa(bydonor[[i]],Origin %in% "Donor")
+  obs<- estimate_richness(tdonor,measures="Observed")
+   percent<- obs$Observed/donorRichness[i]
+    obscaptured<- log((obs$Observed+1)/donorRichness[i])
+   res[[i]]<- cbind(percent,obscaptured)}
+
+
+
+
+recovered<- ldply(res)
+donorratio2<- ldply(donorratio)
+richratio2<- ldply(richratio)
+
+ratios<- cbind(donorratio2,richratio2,recovered)
+rownames(ratios)<- ratios$Sample_name
+converter<- gen1.4
+sample_data(converter)<- ratios
+ratios2<- sample_data(converter)
+ratios2$Compartment<- sample_data(gen1.4)$Compartment
+pathContam<- "P:/Surrogate/Contam/"
+saveRDS(ratios2,paste0(pathContam,"surrv1_ratios.RDS"))
+
+
+```
+
+Fit models, make plots 
+```{r}
+
+pathplots<-  "P:/Surrogate/Transplant_Anaylsis/Plots/" 
+pathR<-  "P:/Surrogate/Transplant_Anaylsis/Results/" 
+
+
+deviate2<- function(x,des=TRUE){
+sdata<- sample_data(x)
+sdata<- data.frame(sdata)
+sdata$Time<- as.factor(sdata$Time)
+contrasts(sdata$Time)= contr.sum
+contrasts(sdata$Plant)=contr.sum
+contrasts(sdata$Donor_Species)= contr.sum
+contrasts(sdata$Compartment)=contr.sum
+contrasts(sdata$Cultured.Total)= contr.sum
+deviate<- model.matrix(~Plant*Donor_Species*Cultured.Total*Time*Compartment,data=sdata)
+if(des==TRUE){
+covarsdev<- deviate[,c(-1,-26:-32)]
+}else{
+ covarsdev<- deviate[,c(-26:-32)]
+
+}
+return(covarsdev)}
+
+ratiodev<- deviate3(gen1.4)
+
+#summary(drntlm<- lm(ratios3$Not.Target.Ratio~                     #Compartment*Plant*Donor_Species*Cultured.Total*Time,data=ratiosdata))
+#Just playing here
+
+#summary(drlm<- lm(ratios3$All_othersRatio~ratiodev))
+summary(drntlm<- lm(ratios3$Not.Target.Ratio~ratiodev))
+summary(drudlm<- lm(ratios3$Undetected.Ratio~ratiodev))
+
+summary(rrntlm<- lm(ratios3$Non.target_Donor~ratiodev))
+summary(rrudlm<- lm(ratios3$Undetected~ratiodev))
+summary(pclm<- lm(ratios3$percent~ratiodev))
+
+model_results<- list(drntlm,drudlm,rrntlm,rrudlm,pclm)
+
+
+names1<- c("(Intercept)",colnames(ratiodev))
+names2<- gsub("1","", names2)
+coef_res<- lapply(model_results,function(x){
+ x2<- data.frame(summary(x)$coefficients[,c(1,4)],term=names2)
+})
+names(coef_res)<- c("DR_NT","DR_UD","RR_NT","RR_UD","%_RC")
+coef_res2<- lapply(coef_res,function(x){ x %>% 
+         mutate(Filtered_Estimate = if_else(Pr...t.. > 0.05, 0,sqrt(Estimate^2)))})
+
+res<- ldply(coef_res2)
+
+ggplot(data=res, aes(.id,term)) +
+  geom_tile(data=res,aes(fill = Filtered_Estimate), colour = "white") +
+  scale_fill_gradient2(low = "red",mid="white", high ="steelblue")+
+  ylab("")+xlab("Ratio")+theme_bw()
+
+ggsave(paste0(pathPlots,"ratio_coefficient_heatmap.png"),dpi=300)
+
+#summary.lm(divratioaov<- aov(ratios3$All_othersRatio~sdata$donorCulCom))
+#htest1<- HSD.test(divratioaov ,"sdata$donorCulCom", group=TRUE)
+summary(divratioaov<- aov(ratios3$Not.Target.Ratio~sdata$donorCulCom))
+mm_dr_nt<- HSD.test(divratioaov ,"sdata$donorCulCom", group=TRUE)
+summary.lm(sppcaov<- lm(ratios3$Undetected.Ratio~sdata$donorCulCom))
+mm_dr_ud<- HSD.test(sppcaov ,"sdata$donorCulCom", group=TRUE)
+summary.lm(divratioaov<- aov(ratios3$Non.target_Donor ~sdata$donorCulCom))
+mm_rr_nt<- HSD.test(divratioaov ,"sdata$donorCulCom", group=TRUE)
+summary.lm(divratioaov<- aov(ratios3$Undetected~sdata$donorCulCom))
+mm_rr_ud<- HSD.test(divratioaov ,"sdata$donorCulCom", group=TRUE)
+summary(divratioaov<- aov(ratios3$percent~sdata$donorCulCom))
+mm_pc<- HSD.test(divratioaov ,"sdata$donorCulCom", group=TRUE)
+
+donor_mms<- cbind(rownames(mm_dr_ud$groups),mm_dr_ud$groups,rownames(mm_dr_nt$groups) ,mm_dr_nt$groups,
+                  rownames(mm_rr_nt$groups),mm_rr_nt$groups,rownames(mm_rr_ud$groups),mm_rr_ud$groups,rownames(mm_pc$groups),mm_pc$groups)
+
+write.csv(donor_mms,file=paste0(pathR,file="donor_ratio_marginal_means.csv"))
+
+
+#summary(rrntudlm<- lm(ratios3$NT_UD~ratiodev))
+
+
+write.csv(summary(divratiotglm)$coefficients,paste0(path,file="divratio_nt.csv"))
+write.csv(summary(divratioudlm)$coefficients,paste0(path,file="divratio_ud.csv"))
+
+rk1<- rank(tapply(ratios3$Non.target_Donor,ratios3$donorCulCom,mean))
+rk2<- rank(tapply(ratios3$Undetected,ratios3$donorCulCom,mean))
+rk3<- rank(tapply(ratios3$Not.Target.Ratio,ratios3$donorCulCom,mean))
+rk4<- rank(tapply(ratios3$Undetected.Ratio,ratios3$donorCulCom,mean))
+rk5<- rank(tapply(ratios3$percent,ratios3$donorCulCom,mean))
+
+rks<- cbind(rk1,rk2,rk3,rk4,rk5)
+apply(rks,1,mean)
+
+
+```
+
+Make plots 
+```{r}
+pathplots<-  "P:/Surrogate/Transplant_Anaylsis/Plots/" 
+pathR<-  "P:/Surrogate/Transplant_Anaylsis/Results/" 
+levels(ratios3$.id) <- gsub(" ", "\n", levels(ratios3$.id))
+
+undetec<-as.data.frame(ratios3$Undetected)
+nt<-as.data.frame(ratios3$Non.target_Donor)
+undetec<-  cbind(undetec,rep("Undetected",length=length(ratios3$Undetected)),ratios3$Plant,ratios3$.id)
+nt<-  cbind(nt,rep("Non-Target",length=length(ratios3$Undetected)),ratios3$Plant,ratios3$.id)
+colnames(nt)<-c("ratio","Type","Plant","id")
+colnames(undetec)<-c("ratio","Type","Plant","id")
+undt<- rbind(nt,undetec)
+
+
+
+gl<- ggplot(data=undt,aes(Plant,ratio,color=Type,fill=Plant))+
+  geom_boxplot(alpha=0.3,size=1.5,position=position_dodge(0.01))+
+  geom_hline(yintercept = 0)+xlab("")+
+  ylab("Log Read Ratio")+
+  facet_wrap(~id,nrow=1)+theme_light()+
+  theme(axis.text.x=element_blank())+
+  theme(strip.text = element_text(color="black", size=7),axis.title.y  =element_text(size=8),
+        strip.background = element_rect(fill="white"))
+
+g1<- gl+theme(legend.position = "none")
+
+ggsave(paste0(pathplots,"eval_reads.png"),dpi=300)
+
+## for div 
+
+levels(ratios3$.id) <- gsub(" ", "\n", levels(ratios3$.id))
+
+undetec<- as.data.frame(ratios3$Undetected.Ratio)
+ nt<-as.data.frame(ratios3$Not.Target.Ratio)
+ div<- as.data.frame(log(ratios3$Total.Diversity))
+undetec<-  cbind(undetec,ratios3$donorCulCom,rep("Undetected",length=length(ratios3$Undetected)),ratios3$Plant,ratios3$.id,div)
+nt<-  cbind(nt,ratios3$donorCulC,rep("Non-Target",length=length(ratios3$Undetected)),ratios3$Plant,ratios3$.id,div)
+colnames(nt)<-c("ratio","Donor","Type","Plant","id","Div")
+colnames(undetec)<-c("ratio","Donor","Type","Plant","id","Div")
+undtdiv<- rbind(nt,undetec)
+
+
+
+
+g2<- ggplot(data=undtdiv ,aes(Plant,ratio,color=Type,fill=Plant))+
+  geom_boxplot(alpha=0.3,size=1.5,position=position_dodge(0.01))+
+  geom_hline(yintercept = 0)+xlab("")+  
+  ylab("Diversity Ratio")+
+  facet_wrap(~id,nrow=1)+
+  theme_light()+ 
+     geom_jitter(data=nt,aes(Plant,Div),alpha=0.3)+
+  theme(strip.text = element_blank(),axis.title.y  =element_text(size=8),
+        strip.background = element_rect(fill="white"),axis.text.x=element_blank(),legend.position = "none")+scale_y_continuous(breaks=seq(-2,4,1)) ## This one 
+
+grob1<- gridExtra::arrangeGrob(g1,g2,ncol=1)
+ggsave(paste0(pathplots,"eval_richness.png"),dpi=300)
+
+g3<- ggplot(data=ratios3,aes(percent,fill=donorCulCom))+geom_density(alpha=0.3)+facet_wrap(~donorCulCom,ncol=8)+theme_light()+theme(legend.position = "none",strip.text = element_blank(),axis.title.y  =element_text(size=8),strip.background = element_rect(fill="white"))+xlab("% Species Recovered")
+ggsave(paste0(pathplots,"species_recovered.png"),dpi=300)
+
+ggplot(data=ratios3,aes(x=plastidRatio,y=Undetected.Ratio,color=Plant))+geom_point(size=2)+geom_vline(xintercept = 0)+geom_hline(yintercept = 0)+geom_smooth(method="lm")+facet_wrap(~Compartment)
+ggsave(paste0(pathplots,"plastidvsundetecedratio.png"),dpi=300)
+
+lay<-  rbind(c(1,1,1,1,1),
+            c(1,1,1,1,1),
+            c(1,1,1,1,1),
+            c(1,1,1,1,1),
+             c( 2,2,2,2,2),
+            c( 2,2,2,2,2),
+             c( 2,2,2,2,2),
+              c(3,3,3,3,3),
+               c(3,3,3,3,3))
+lay2<-  rbind(c(1,1,1,1,1,4),
+            c(1,1,1,1,1,4),
+            c(1,1,1,1,1,5),
+            c(1,1,1,1,1,5),
+             c( 2,2,2,2,2,5),
+            c( 2,2,2,2,2,5),
+             c( 2,2,2,2,2,5),
+              c(3,3,3,3,3,5),
+               c(3,3,3,3,3,5))
+
+gA <- ggplotGrob(g1)
+gB <- ggplotGrob(g2)
+gC<- ggplotGrob(g3)
+maxWidth = grid::unit.pmax(gA$widths[2:5], gB$widths[2:5],gC$widths[2:5])
+gA$widths[2:5] <- as.list(maxWidth)
+gB$widths[2:5] <- as.list(maxWidth)
+gC$widths[2:5] <- as.list(maxWidth)
+ 
+plotLaidOut<- grid.arrange(gA,gB,gC,layout_matrix=lay)
+
+extract_legend <- function(a.gplot){ 
+  tmp <- ggplot_gtable(ggplot_build(a.gplot)) 
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box") 
+  legend <- tmp$grobs[[leg]] 
+  return(legend)} 
+
+gglegend<- extract_legend(gl)
+plotLaidOutwlegend<-grid.arrange(gA,gB,gC,gglegend,layout_matrix=lay2)
+
+ggsave(plotLaidOut,file=paste0(pathplots,"TEres_arranged.png"),dpi=400)
+ggsave(plotLaidOutwlegend,file=paste0(pathplots,"TEres_arrangedwLegend.png"),dpi=400)
+
+```
+
+End here. 
