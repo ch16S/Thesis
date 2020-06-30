@@ -1,0 +1,128 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+Read in data
+
+```{r}
+
+
+library(phyloseq)
+ps_data<- readRDS(file=paste0("P:/Surrogate/ecological modelling/","contam_model_data_by_rajsd.RDS"))
+
+dm_plv<- readRDS(file=paste0("P:/Surrogate/ecological modelling/",
+                          "DM_PLV_GLLVM.RDS"))
+
+
+# Function to order axes of latent variable
+sort_axis<- function(axes){
+ axes_ordered<- vector("list",length= ncol(axes)*2)
+for(i in 1:ncol(axes)){
+    axes_ordered[[i]]<-  order(axes[,i],decreasing=TRUE)
+    axes_ordered[[(i+ncol(axes))]] <- order(axes[,i], decreasing=FALSE)
+}
+ results<- as.data.frame(axes_ordered)
+return(results)
+}
+
+# Run the same models with random partitioned
+lvs<- sort_axis(dm_plv$PPE$lvs )
+#samples to leave out
+lo<- c(36:39)
+#Order + partiton data 
+y<- data.frame(ps_data$otus)[lvs[,5],]
+test<- y[lo,]
+y<- y[-lo,]
+
+# Define paramters
+n_sp <- ncol(y) # number of OTUs/ASVs
+n_lvs<- 1 # numbr of latent factors
+n_obs <- nrow(y) # number of samples
+
+
+
+
+
+
+
+```
+
+
+```{r}
+
+# Define model 
+library(greta)
+
+# Error model (latent variabes)
+loadings <- zeros(n_sp, n_lvs)
+diag(loadings) <- normal(0,sqrt(10), dim = n_lvs, truncation = c(0, Inf))
+lower_idx <- lower.tri(loadings)
+loadings[lower_idx] <- normal(0, sqrt(10), dim = sum(lower_idx))
+
+lvs <- normal(0, 1, dim = c(n_obs, n_lvs))
+random<- lvs %*% t(loadings) 
+
+eta<- random
+
+
+#Function for regularised horseshoe. Hyperprior on tau
+tau<- normal(0,0.5,truncation = c(0,Inf))
+regularized_horseshoe <- function (tau, c=1, dim = NULL) {
+
+  lambda <- cauchy(0, 1, truncation = c(0, Inf), dim = dim)
+  lambda_tilde <- sqrt((c^2 * lambda^2) / (c^2 + tau^2 * lambda^2))
+  sd <-  normal(0,tau*lambda_tilde)
+  return(sd)
+}
+
+alpha <- regularized_horseshoe(tau=tau,dim=c(n_sp,n_sp))
+
+# carrying capacity 
+k<-  exponential(1, dim= n_sp)
+
+
+A<- sweep(alpha,1,k,"/")
+# Growth rate
+R_diag = greta::normal(0, sqrt(10), dim=n_sp)
+#Inital value 
+mu0<- greta::normal(0, sqrt(10), dim=n_sp)
+#MAR
+mu <- vector("list",length=nrow(y)+1)
+mu[[1]] <- mu0
+for (n in 1:nrow(y)) {
+  mu[[n + 1]] <- mu[[n]] + R_diag * (1 - A %*% mu[[n]]) # +t(eta[n,]) # epsilon[t,]
+}
+
+mu_all <- do.call(cbind, mu[-1])
+
+expeta <- exp(t(mu_all)) 
+
+distribution(y) <- dirichlet_multinomial(rowSums(y), alpha=expeta)
+
+
+m_fit <- greta::model(expeta,lvs,loadings,alpha,mu0,
+                      R_diag , k,tau,
+                      precision="double")
+
+
+#Sample from model 
+draws <- greta::mcmc(m_fit,
+              n_samples = 60000,
+              warmup = 30000,
+              thin = 2,
+              verbose = TRUE,
+              chains =1,
+              sampler=hmc(Lmin=30,Lmax=35))
+         
+ppes<-  extract_point_estimates(draws,m_fit)
+summary(coda::effectiveSize(ppes$Dtraws$alpha))
+gk<- coda::geweke.diag(ppes$Draws$alpha)
+sum(p.adjust(pnorm(abs(gk1$z),lower.tail = FALSE)*2,"holm")<0.05)/nrow(draws$`1`)
+
+saveRDS(ppes,file=paste0("P:/Surrogate/ecological modelling/",
+                         "gompertz_hs_tauhalfnormal.RDS"))
+
+
+```
