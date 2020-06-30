@@ -1,0 +1,197 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+
+
+library(phyloseq)
+ps_data<- readRDS(file=paste0("P:/Surrogate/ecological modelling/","contam_model_data_by_rajsd.RDS"))
+
+y<- data.frame(ps_data$otus)
+
+seqDepth<- rowSums( y)
+#seqDepth<- rowSums(y)
+n_samples = 60000
+warmup = 30000
+thin = 25
+
+n_sp <- ncol(y) # number of OTUs/ASVs
+n_lvs<- 3 # numbr of latent factors
+n_obs <- nrow(y) # number of samples
+
+contrasts(ps_data$sdata$Treatment)=contr.sum
+X<- model.matrix(~ps_data$sdata$Treatment)[,-1]
+
+initial<- t(ps_data$intial)
+
+
+library(greta)
+
+
+```
+
+Define model
+```{r}
+
+# Size
+
+# Noise
+
+int<- normal(0,10,dim=n_sp)
+loadings <- zeros(n_sp, n_lvs)
+diag(loadings) <- normal(0,sqrt(10), dim = n_lvs, truncation = c(0, Inf))
+lower_idx <- lower.tri(loadings)
+loadings[lower_idx] <- normal(0, sqrt(10), dim = sum(lower_idx))
+# latent variables
+
+lvs <- normal(0, 1, dim = c(n_obs, n_lvs))
+
+
+# enviro model
+coef<- normal(0,1,dim=c(ncol(X),n_sp))
+env <- X %*% coef
+fixed<- sweep(env,2,int,"+")
+random<- lvs %*% t(loadings) 
+
+eta<- fixed + random
+
+
+# convert to rates and define distribution
+expeta <- exp(eta)
+# add the offset and timepoint error
+# remove the first time-point
+distribution(y) <- dirichlet_multinomial(rowSums(y), alpha=expeta)
+
+m_fit <- greta::model(expeta,lvs,loadings,int,
+                       coef,
+                      precision="double")
+
+
+
+draws <- greta::mcmc(m_fit,
+              n_samples = n_samples,
+              warmup = warmup,
+              thin = thin,
+              verbose = TRUE,
+              chains =1,
+              sampler=hmc(Lmin=30,Lmax=35))
+              #one_by_one = TRUE)
+
+ppes<- extract_point_estimates(draws,m_fit)
+
+```
+
+Extract residual precision
+
+
+```{r}
+
+
+cor_res<- pres_res<- cov_res<- array(0,dim=c(nrow(ppes$Draws$loadings),n_sp,n_sp))
+for(i in 1:nrow(ppes$Draws$loadings)){
+  ld<- matrix(ppes$Draws$loadings[i,],ncol=n_sp,nrow=n_sp)
+  ldcov<- ld %*% t(ld)
+  ldcor<- cov2cor(ldcov)
+  ldpres<- MASS::ginv(ldcor)
+  cor_res[i,,]<- ldcor
+  cov_res[i,,]<- ldcov
+  pres_res[i,,]<- ldpres
+}
+upper_cor<- lower_cor<- sig_cor<- sig_pres<- cor_median<- pres_median<- matrix(0,ncol=n_sp,nrow=n_sp)
+for(l in 1:n_sp){
+  for(k in 1:n_sp){
+    cor_hdps <- HPDinterval(as.mcmc(cor_res[, l, k]), prob = 0.95)
+    pres_hdps<- HPDinterval(as.mcmc(pres_res[, l, k]), prob = 0.95)
+    lower_cor[l,k]<- cor_hdps[1]
+    upper_cor[l,k]<- cor_hdps[2]
+    cor_median[l,k] <- median(as.mcmc(cor_res[, l, k]))
+    pres_median[l,k] <- median(as.mcmc(pres_res[, l, k]))
+    
+    sig_pres[l,k]<- pres_median[l,k]
+    sig_cor[l,k]<- cor_median[l,k]
+    if (0 > cor_hdps[1] & 0 < cor_hdps[2]){     
+      sig_cor[l, k] <- 0
+  }
+  if (0 > pres_hdps[1] & 0 < pres_hdps[2]){ 
+    sig_pres[l, k] <- 0
+  }
+  }
+
+
+```
+
+Make network
+
+```{r}
+
+
+
+rownames(sig_pres)<- colnames(sig_pres)<- make.unique(as.vector(ps_data$tax[,"Genus"]))
+
+g1<- graph_from_adjacency_matrix(sig_pres,mode="undirected",weighted="Precision",
+                                diag=FALSE)
+V(g1)$Family<- (ps_data$tax[,"Family"])
+V(g1)$Genus<-  (ps_data$tax[,"Genus"])
+V(g1)$Class<-  (ps_data$tax[,"Class"])
+
+g2<- delete_vertices(g1,degree(g1)==0)
+infoclust<- cluster_infomap(g2)
+
+V(g2)$color <- ifelse(V(g2)$Class == "c__[Saprospirae]","lightblue",
+                      ifelse(V(g2)$Class == "c__Gammaproteobacteria","lightgreen",
+                             ifelse(V(g2)$Class ==  "c__Alphaproteobacteria","orange",
+                                    ifelse(V(g2)$Class ==  "c__Betaproteobacteria","yellow",
+                                           ifelse(V(g2)$Class == "c__Cytophagia" ,"pink" ,"green" )))))
+
+V(g2)$Membership<- ifelse(infoclust$membership==1,"lightblue","orange")
+
+E(g2)$lty<- ifelse(E(g2)$Precision >0,2,1)
+
+
+
+png("DM_gllvm_pres_class.png", width = 465, height = 225, units='mm', res = 300)
+
+plot(g2, arrow.size=0.2, vertex.frame.color=NA,vertex.label.dist=0.0,vertex.label=NA, vertex.color=V(g2)$color,
+     vertex.label.cex=0.7,vertex.label.font=.02,edge.arrow.size=0.4,vertex.size= 6, layout=layout_nicely(g2))
+# Add a legend
+legend("bottomleft", legend=unique(V(g2)$Class)  , col = unique(V(g2)$color) , bty = "n", pch=20 , pt.cex = 3, cex = .75*2, , horiz = FALSE, inset = c(0.1, 0.1))
+dev.off()
+
+
+
+png("DM_gllvm_pres_infomap.png", width = 465, height = 225, units='mm', res = 300)
+
+plot(g2, arrow.size=0.2, vertex.frame.color=NA,vertex.label.dist=0.0,vertex.label=NA, vertex.color=V(g2)$Membership,
+     vertex.label.cex=0.7,vertex.label.font=.02,edge.arrow.size=0.4,vertex.size= 6, layout=layout_nicely(g2))
+# Add a legend
+
+dev.off()
+```
+
+Calculate random graphs 
+```{r}
+K<- sum(degree(g1))
+
+random_graphs<- lapply(1:100,function(x){
+  erdos.renyi.game(n=35,k, type="gnm")
+})
+
+allgraphs<- vector("list",101)
+allgraphs[[1]]<- g1
+allgraphs[2:101]<- randomgraphs
+source("dstatistic")
+ds<- dmatrix(allgraphs)
+
+real<- ds[lower.tri(ds[,1])]
+null<- ds[lower.tri(ds[,-1])]
+mean(real)
+sd(real)/sqrt(100)
+mean(null)
+sd(null)/sqrt(4950)
+
+```
+
+
