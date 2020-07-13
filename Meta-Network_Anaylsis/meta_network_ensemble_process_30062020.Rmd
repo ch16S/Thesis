@@ -1,0 +1,481 @@
+---
+title: " Networks"
+output: html_notebook
+---
+
+
+```{r}
+
+library(boral)
+library(igraph)
+library(ggnetwork)
+library(ggpubr)
+library(gridExtra)
+library(plyr)
+pathB<- "H:/cbal5115/Brassica/"
+pathP<- "P:/Surrogate/Network_Comparison/Data/"
+pathOld<- "H:/cbal5115/Documents/PhD/Probiotics/Surrogate/files/"
+
+pathS<-"P:/Surrogate/Network_Comparison/Scripts/"
+source(paste0(pathS,"network_functions13_05.R"))
+
+```
+
+Reran: Poor SCs
+PNAS rhizo endo (adjusted covar matrix)
+LV2 for the Brassical SCGs was good
+
+
+```{r}
+
+
+DSCcors <-readRDS(paste0(pathP,"DSCsrescorbrlCR.RDS"))
+DSCphys <-readRDS(paste0(pathP,"BrassicaDSCGs.RDS"))
+
+PSCphys <-readRDS(paste0(pathP,"BrassicapoorSCs.RDS"))
+PSCcorslv2 <-readRDS(paste0(pathP,"PSCsLV2rescorbrlCR.RDS"))
+
+SCGsphys <-readRDS(paste0(pathP,"BrassicaSCGs.RDS"))
+SCGscors2 <-readRDS(paste0(pathP,"SCGsLV2rescorbrlCR.RDS"))
+
+dcfamPhys<- readRDS(paste0(pathP,"dcsff.RDS"))
+dcfamCorslv2<- readRDS(paste0(pathP,"Fam_lv2_dnrcm_rescor.RDS"))
+
+pcfamPhys<- readRDS(paste0(pathP,"pcsff.RDS"))
+pcfamCorslv2<- readRDS(paste0(pathP,"Fam_lv2_plntcm_rescor.RDS"))
+
+
+REPPhys<- readRDS(paste0(pathP,"rhizoendos.RDS"))
+REPCorslv2<- readRDS(paste0(pathP,"EndoRhizos_LV2rescorbrlCR.RDS"))
+
+rgsphys<- readRDS(paste0(pathP,"riceGenosite.RDS"))
+rgsCorslv2<- readRDS(paste0(pathP,"RiceGenoSite_LV2_rescorbrlCR.RDS"))
+
+
+rsphys<- readRDS(paste0(pathP,"RiceSite.RDS"))
+rsCors<- readRDS(paste0(pathP,"RiceSite_rescorbrlCR.RDS"))
+
+grapeFcors <-readRDS(paste0(pathP,"grape_root_lv5_2res.RDS"))
+grapeFcorslv2 <-readRDS(paste0(pathP,"grape_root_lv2_2res.RDS"))
+
+arb2016corslv2<-readRDS(paste0(pathP,"rt_arb_2016_lv2rescorbrlCR.RDS"))
+arb2014corslv2 <-readRDS(paste0(pathP,"rt_arb_2014_lv2rescorbrlCR.RDS"))
+jo2016corslv2 <-readRDS(paste0(pathP,"rt_joe_2016_lv2rescorbrlCR.RDS"))
+
+
+jo2016phys <-readRDS(paste0(pathP,"rt_joe2016_Asvs.RDS"))
+arb2016phys <-readRDS(paste0(pathP,"rt_arb2016_Asvs.RDS"))
+arb2014phys <-readRDS(paste0(pathP,"rt_arb2014_Asvs.RDS"))
+
+
+```
+
+Rename taxa in phyloseq objects and in correlation; this faciltates the comparison across networkss and studies
+```{r}
+
+PSCphys2 <- lapply(PSCphys[[1]],function(x){
+  v1<- taxwording(x)
+  v2<- brassica_renamer(v1)
+  v3<- renamer(v2)
+  return(v3)})
+DSCphys2 <- lapply(DSCphys[[1]],function(x){
+   v1<- taxwording(x)
+  v2<- brassica_renamer(v1)
+  v3<- renamer(v2)
+  return(v3)})
+SCGsphys2 <- lapply(SCGsphys[[1]],function(x){
+  v1<- taxwording(x)
+  v2<- brassica_renamer(v1)
+  v3<- renamer(v2)
+  return(v3)})
+
+REPPhys2 <- lapply(REPPhys[[1]],function(x){
+  v1<- taxwording(x)
+  
+   foralteration<- grep(tax_table(v1)[,"Family"],pattern="e_")
+   if(length(foralteration )> 0){
+   print(foralteration)
+  tax_table(v1)[foralteration,"Family"]<- paste0(sapply(strsplit(tax_table(v1)[foralteration,"Family"],"e_"),"[",1),"e")
+}
+  v2<- renamer(v1)
+  return(v2)})
+
+EPPhys2 <- lapply(EPPhys[[1]],function(x){
+  v1<- taxwording(x)
+  v2<- renamer(v1)
+  return(v2)})
+
+rgsphys2 <- lapply(rgsphys[[1]],function(x){
+  v1<- taxwording(x)
+  v2<- renamer(v1)
+  return(v2)})
+
+
+arb2014phys2<- lapply(arb2014phys,function(x){
+  v1<- taxwording(x)
+  v2<- renamer(v1)
+  return(v2)})
+
+jo2016phys2 <- lapply(jo2016phys,function(x){
+  v1<- taxwording(x)
+  v2<- renamer(v1)
+  return(v2)})
+
+arb2016phys2 <- lapply(arb2016phys,function(x){
+  v1<- taxwording(x)
+  v2<- renamer(v1)
+  return(v2)})
+
+
+dcfamPhys<- readRDS(paste0(pathP,"dcsff.RDS"))
+pcfamPhys<- readRDS(paste0(pathP,"pcsff.RDS"))
+
+grapephys2 <- lapply(grapeFphys[1:8],function(x){
+  v1<-taxwordingGG(x)
+  v2<- taxformat(v1)
+  v3<- renamer(v2)
+  return(v3)})
+
+dcfamPhys2 <- lapply(dcfamPhys,function(x){
+ v1<-taxwordingGG(x)
+  v2<- taxformat(v1)
+  v3<- renamer(v2)
+  return(v3)})
+
+pcfamPhys2 <- lapply(pcfamPhys,function(x){
+ v1<-taxwordingGG(x)
+  v2<- taxformat(v1)
+  v3<- renamer(v2)
+  return(v3)})
+
+
+ namesREP<- paste0("Rhizo_",names(REPPhys2))
+ names(REPCors)<- namesREP
+ names(REPPhys2)<- namesREP
+ 
+```
+ 
+ 
+```{r}
+ 
+
+
+
+allphyslv2<- c(SCGsphys2,REPPhys2,
+            rgsphys2,grapephys2,dcfamPhys2,pcfamPhys2,arb2014phys2,arb2016phys2,jo2016phys2 )
+
+saveRDS(allphyslv2,paste0(pathP,"renamed_phylo_list.RDS"))
+
+
+allcorslv2<- c( SCGscorslv2,  REPCorslv2, rgsCorslv2, 
+                grapeFcorslv2, dcfamCorslv2 ,pcfamCorslv2,
+                arb2014corslv2,arb2016corslv2,jo2016corslv2)
+
+names(allcorslv2)<- names(allphys)
+
+
+saveRDS(allcorslv2,paste0(pathP,"allcors_LV2.RDS"))
+
+```
+
+
+```{r}
+
+freq_pbs<- readRDS(file=paste0(pathP,"freq_pres_list.RDS"))
+freq_mbs<- readRDS(file=paste0(pathP,"freq_mbs_list.RDS"))
+the_mbs<- readRDS(file=paste0(pathP,"lv2_MBs.RDS"))
+
+
+#### Make the networks from the precision matrices
+precisionGraphslv5<- precisionGraphslv2<- precisionGraphslv3<-vector("list",length=length(allcorslv3))
+
+pbs_Graphs<- fmb_Graphs<- mb_Graphs<- vector("list",length=length(freq_mbs))
+
+
+for(i in 1:length(allcorslv2)){
+    rngraph <-renameNetworks(allcorslv2[[i]],allphys[[i]])
+    graph_list1 <-network_precision(rngraph,allphys[[i]])
+    precisionGraphslv2[[i]]<- graph_list1
+  
+}
+
+for(i in 1:length(the_mbs)){
+    rngraph <-renameNetworks(the_mbs[[i]],allphys[[i]],type="mb")
+    graph_list1 <-network_mb(rngraph,allphys[[i]])
+    mb_Graphs[[i]]<- graph_list1
+  
+}
+  
+  
+
+for(i in 1:length(fmb_Graphs)){
+  if(sum(is.na(freq_mbs[[i]]))> 0){
+    graph_list1<-NA
+  } else{
+  rngraph <-renameNetworks(freq_mbs[[i]],allphys[[i]],type="mb")
+  graph_list1 <-network_mb(rngraph,allphys[[i]])
+  }
+  fmb_Graphs[[i]]<- graph_list1
+
+}
+
+
+
+
+for(i in 1:length(pbs_Graphs)){
+  print(names(freq_pbs)[i])
+  if(sum(is.na(freq_pbs[[i]]))> 0){
+    graph_list1<-NA
+  } else{
+  rngraph <-renameNetworks(freq_pbs[[i]],allphys[[i]],type="Residual")
+  graph_list1 <-network_emp(rngraph,allphys[[i]])
+  }
+  pbs_Graphs[[i]]<- graph_list1
+
+}
+
+names(precisionGraphslv2)<-names(pbs_Graphs)<- names(mb_Graphs)<- names(fmb_Graphs)<- names(allphys)
+
+
+
+```
+ 
+ 
+
+```{r}
+
+
+merged_freqs<-merged_brls<-  vector("list",length=length(precisionGraphslv2))
+for(i in 1:length(precisionGraphslv2)){
+  one<- precisionGraphslv2[[i]]
+  two<- mb_Graphs[[i]]
+  if(any(is.na(one))==TRUE & any(is.na(two))==TRUE  ){
+    gm1<- NA
+  }else if(any(is.na(one))==TRUE){
+    gm1<- two
+  } else if(any(is.na(two))==TRUE){
+    gm1<- one
+  }else{ 
+    gm1<-  one %u% two
+     }
+ merged_brls[[i]]<- gm1
+}
+
+
+for(i in 1:length(precisionGraphslv2)){
+  one<- pbs_Graphs[[i]]
+  two<- fmb_Graphs[[i]]
+  if(any(is.na(one))==TRUE & any(is.na(two))==TRUE  ){
+    gm1<- NA
+  }else if(any(is.na(one))==TRUE){
+    gm1<- two
+  } else if(any(is.na(two))==TRUE){
+    gm1<- one
+  }else{ 
+    gm1<-  one %u% two
+  }
+  merged_freqs[[i]]<- gm1
+}
+
+
+for(i in 1:length(precisionGraphslv2)){
+  one<- pbs_Graphs[[i]]
+  two<- mb_Graphs[[i]]
+  if(any(is.na(one))==TRUE & any(is.na(two))==TRUE  ){
+    gm1<- NA
+  }else if(any(is.na(one))==TRUE){
+    gm1<- two
+  } else if(any(is.na(two))==TRUE){
+    gm1<- one
+  }else{ 
+    gm1<-  one %u% two
+  }
+  merged_alts[[i]]<- gm1
+}
+
+
+
+
+names(merged_freqs)<- names(merged_brls)<- names(allphys) 
+
+merged_graphs<-  vector("list",length=length(precisionGraphslv2))
+for(i in 1:length(precisionGraphslv2)){
+  gm1<-  merged_brls[[i]] %s% merged_freqs[[i]]
+  merged_graphs[[i]]<- gm1
+}
+
+
+merged_emps<-merged_mbs<-  vector("list",length=length(precisionGraphslv2))
+for(i in 1:length(precisionGraphslv2)){
+  one<- fmb_Graphs[[i]]
+  two<- mb_Graphs[[i]]
+  if(any(is.na(one))==TRUE & any(is.na(two))==TRUE  ){
+    gm1<- NA
+  }else if(any(is.na(one))==TRUE){
+    gm1<- two
+  } else if(any(is.na(two))==TRUE){
+    gm1<- one
+  }else{ 
+    gm1<-  one %u% two
+  }
+  merged_mbs[[i]]<- gm1
+}
+
+
+for(i in 1:length(precisionGraphslv2)){
+  one<- pbs_Graphs[[i]]
+  two<- precisionGraphslv2[[i]]
+  if(any(is.na(one))==TRUE & any(is.na(two))==TRUE  ){
+    gm1<- NA
+  }else if(any(is.na(one))==TRUE){
+    gm1<- two
+  } else if(any(is.na(two))==TRUE){
+    gm1<- one
+  }else{ 
+    gm1<-  one %u% two
+  }
+  merged_emps[[i]]<- gm1
+}
+
+merged_graphs2<-  vector("list",length=length(precisionGraphslv2))
+for(i in 1:length(precisionGraphslv2)){
+  gm1<-  intersection(merged_mbs[[i]], merged_emps[[i]])
+  merged_graphs2[[i]]<- gm1
+}
+
+
+
+merged_graphs3<-  vector("list",length=length(precisionGraphslv2))
+for(i in 1:length(precisionGraphslv2)){
+  gm1<-  merged_graphs[[i]] %s% merged_graphs2[[i]]
+  merged_graphs3[[i]]<- gm1
+}
+
+names(merged_graphs2)<-names(allphys)
+bmb_d<- dmatrix(mb_Graphs)
+fmb_d<- dmatrix(fmb_Graphs)
+pbs_d<- dmatrix(pbs_Graphs)
+bci_d<- dmatrix(precisionGraphslv2 )
+
+
+merged_graphs <- dmatrix(merged_graphs)
+merged_graphs2 <- dmatrix(merged_graphs2)
+merged_graphs3 <- dmatrix(merged_graphs3)
+rownames(merged_d3)<-colnames(merged_d3)<- names(allphys)
+
+
+
+baseGraphs<- list(mb_Graphs,fmb_Graphs,pbs_Graphs,precisionGraphslv2)
+baseAdjs<- list(the_mbs,freq_mbs,freq_pbs,allcorslv2)
+names(baseGraphs[[1]])<-names(baseGraphs[[2]])<-names(baseGraphs[[3]])<-names(baseGraphs[[4]])<-names(allphys)
+names(baseAdjs[[1]])<-names(baseAdjs[[2]])<-names(baseAdjs[[3]])<-names(baseAdjs[[4]])<-names(allphys)
+
+names(baseAdjs)<-names(baseGraphs)<- c("B-MB","F-MB","F-BS","B-CI")
+saveRDS(baseAdjs,file=paste0(pathP,"baseAdjs.RDS"))
+saveRDS(baseGraphs,file=paste0(pathP,"baseGraphs.RDS"))
+
+ensemble_networks<- list(merged_graphs,merged_graphs2,merged_graphs3)
+names(ensemble_networks)<-c("JSDM_type","Ntk_type","Stringent")
+saveRDS(ensemble_networks,file=paste0(pathP,"ensemble_networks.RDS"))
+
+EN_d_matrices<- list(merged_d,merged_d2,merged_d3)
+names(EN_d_matrices)<-c("JSDM_type","Ntk_type","Stringent")
+saveRDS(EN_d_matrices,file=paste0(pathP,"EN_d_matrices.RDS"))
+
+```
+
+
+```{r}
+
+
+graph_to_data_frame <- function(x,physeq,type="boral"){
+  
+  fulltaxonomy<- taxa_names(physeq)
+  if(type=="boral"){
+    cor1<- x[[5]]
+  }else if (type=="mb"){
+    cor1<- as.matrix(x$adjacency_matrix)
+    
+  } else if(type=="bs"){
+    cor1<- x[[2]]
+  }
+  rownames(cor1)<- fulltaxonomy
+  colnames(cor1)<- fulltaxonomy
+  cor2<-cor1[sort(rownames(cor1)), ]
+  cor3<- t(cor2)
+  cor4<- cor3[sort(rownames(cor3)), ]
+  
+  mtx<- cor4
+  mtx[lower.tri(mtx, diag=TRUE)] <- NA
+  dx <- as.data.frame(as.table(mtx))
+  dx <- subset(dx, !is.na(Freq))
+  
+  taxaNames<- paste0(dx$Var2,dx$Var1)
+  dx2<- cbind(dx,taxaNames)
+  colnames(dx2)<-c("to","from","PrecisionValue","edgeID")
+  require(dplyr)
+  dx3<- dx2 %>% filter(PrecisionValue!=0)
+  return(dx3)
+}
+
+
+### Convert networks to data frames for stringent ensemble network 
+msdf<-bmb<-vamb<-vabs<-bci<- vector("list",length=length(allphys))
+for(i in 1:length(allphys )){
+  tryCatch({g1<- graph_to_data_frame(baseAdjs[[1]][[i]],allphys[[i]],type="mb")},error=function(e)NA)
+ bmb[[i]]<- g1
+ tryCatch({g2<- graph_to_data_frame(baseAdjs[[2]][[i]],allphys[[i]],type="mb")},error=function(e)NA)
+ vamb[[i]]<- g2
+ tryCatch({g3<- graph_to_data_frame(baseAdjs[[3]][[i]],allphys[[i]],type="bs")},error=function(e)NA)
+ vabs[[i]]<- g3
+ tryCatch({g4<- graph_to_data_frame(baseAdjs[[4]][[i]],allphys[[i]],type="boral")},error=function(e)NA)
+ bci[[i]]<-g4
+
+ msdf[[i]]<- rbind(g1,g2,g3,g4)
+   
+}
+
+master_edge_list<- list(bmb,vamb,vabs,bci)
+names(master_edge_list)<-  c("bmb","vamb","vabs","bci")
+
+saveRDS(master_edge_list,file=paste0(pathP,"master_edge_df.RDS"))
+
+
+
+
+
+## Remove NAs
+msdf.2<- lapply(msdf,function(x)na.omit(x))
+
+
+  
+notstringent_adj<- lapply(msdf.2,function(x){
+  test1.1<- x %>% group_by(to,from) %>% count() %>% filter(n >1) %>% ungroup()
+  return(test1.1) })
+
+  
+notstringentgraphs<- lapply(notstringent_adj,function(x)igraph::graph_from_data_frame(x[,c("to","from")],directed=FALSE)) 
+notstrn_gs<- lapply(notstringentgraphs,function(x)if(length(E(x))==0){return(x<- NA)}else{(return(x))})
+
+notstrn_gs2<- lapply(notstrn_gs,function(x){
+  if(any(is.na(x))==FALSE){
+  x2<-delete_vertices(x, degree(x)==0)
+  return(x2)}})
+
+
+saveRDS(notstringent_adj,paste0(pathP,"notstringent_adjs.RDS"))
+saveRDS(notstrn_gs2,paste0(pathP,"notstringent_ntks.RDS"))
+
+
+stringent<- lapply(merged_graphs3,function(x){
+  if(any(is.na(x))==FALSE){
+  x2<-delete_vertices(x, degree(x)==0)
+  return(x2)}})
+
+theEnsembleGraphs<- list(stringent,notstrn_gs2)
+names(theEnsembleGraphs)<- c("Stringent","Not_Stringent")
+names(theEnsembleGraphs$Stringent)<- names(allphyslv2)
+saveRDS(theEnsembleGraphs,paste0(pathP,"ensemble_graphs.RDS"))
+
+```
+
